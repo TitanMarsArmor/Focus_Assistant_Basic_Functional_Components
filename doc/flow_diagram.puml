@@ -1,0 +1,136 @@
+@startuml 智能专注助手流程图
+
+skinparam backgroundColor white
+skinparam handwritten false
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 14
+skinparam arrowColor #000000
+skinparam activityBorderColor #000000
+skinparam activityBackgroundColor #FFFFFF
+skinparam activityDiamondBorderColor #000000
+skinparam activityDiamondBackgroundColor #FFFFFF
+
+' 定义全局样式
+skinparam shadowing false
+skinparam roundcorner 8
+skinparam sequenceArrowThickness 2
+skinparam linetype ortho
+
+' 主流程：系统启动流程
+start
+:启动 smart_assistant.py;
+note right
+  智能专注助手主程序
+end note
+:检查Python库依赖;
+diamond:是否缺少依赖?;
+  -> 是 : 显示错误消息
+  -> 否 : 继续
+:创建主窗口和UI组件;
+:显示功能选择界面;
+:用户选择功能模块;
+:启动相应的子进程;
+note right
+  可以启动一个或多个功能模块
+end note
+:各功能模块独立运行;
+stop
+
+@enduml
+
+@startuml 音量监控流程
+
+skinparam backgroundColor white
+skinparam handwritten false
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 14
+skinparam arrowColor #000000
+skinparam activityBorderColor #000000
+skinparam activityBackgroundColor #FFFFFF
+skinparam activityDiamondBorderColor #000000
+skinparam activityDiamondBackgroundColor #FFFFFF
+
+' 定义全局样式
+skinparam shadowing false
+skinparam roundcorner 8
+skinparam sequenceArrowThickness 2
+skinparam linetype ortho
+
+' 音量监控流程
+start
+:VolumeMonitorApp启动; 
+note right
+  音量监控助手模块初始化
+end note
+:启动音量监控线程;
+note right
+  定期监控系统音量状态
+end note
+repeat
+  :获取系统音量状态;
+  :检测是否有媒体播放;
+  diamond:音量不为0且有媒体播放?;
+    -> 是 : 执行暂停操作
+      :发送空格键暂停媒体;
+      :显示音量警告弹窗;
+      :设置系统静音;
+    -> 否 : 继续监控
+  :短暂休眠;
+note right
+  避免过于频繁的检查
+end note
+repeat while (继续监控?)
+stop
+
+@enduml
+
+@startuml 快捷键操作流程
+
+skinparam backgroundColor white
+skinparam handwritten false
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 14
+skinparam arrowColor #000000
+skinparam activityBorderColor #000000
+skinparam activityBackgroundColor #FFFFFF
+skinparam activityDiamondBorderColor #000000
+skinparam activityDiamondBackgroundColor #FFFFFF
+
+' 定义全局样式
+skinparam shadowing false
+skinparam roundcorner 8
+skinparam sequenceArrowThickness 2
+skinparam linetype ortho
+
+' 快捷键操作流程
+start
+:启动快捷键监听;
+note right
+  HotkeyControllerApp或DocumentSaverApp
+end note
+:检测到按键事件;
+diamond:按下的键?;
+  -> A键 : 暂停视频或保存文档
+    diamond:是哪个模块?;
+      -> 快捷键控制器 : 暂停视频
+        :检查操作冷却时间;
+        :发送空格键;
+        :更新状态显示;
+      -> 文档保存助手 : 保存文档
+        :检查操作冷却时间;
+        :获取活动窗口信息;
+        :判断是否为文档应用;
+        :发送Ctrl+S;
+        :更新状态显示;
+  -> B键 : 切换窗口
+    :检查操作冷却时间;
+    :发送Alt+Tab;
+    :更新状态显示;
+  -> Q键 : 退出程序
+    :停止键盘监听;
+    :关闭窗口;
+    :退出程序;
+  -> 其他键 : 忽略
+stop
+
+@enduml

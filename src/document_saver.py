@@ -72,13 +72,23 @@ class DocumentSaverApp:
         try:
             # 获取当前活动窗口的句柄
             hwnd = win32gui.GetForegroundWindow()
+            if hwnd == 0:
+                return "无活动窗口", "unknown"
+            
             # 获取窗口标题
             window_title = win32gui.GetWindowText(hwnd)
+            if not window_title:
+                window_title = "无标题窗口"
+                
             # 获取进程ID
             _, pid = win32process.GetWindowThreadProcessId(hwnd)
             # 获取进程名称
-            process = psutil.Process(pid)
-            process_name = process.name().lower()
+            try:
+                process = psutil.Process(pid)
+                process_name = process.name().lower()
+            except:
+                process_name = "unknown_process"
+                
             return window_title, process_name
         except Exception as e:
             print(f"获取活动窗口信息时出错: {e}")
@@ -97,34 +107,75 @@ class DocumentSaverApp:
             return
         
         try:
+            # 调试信息 - 开始保存操作
+            print("\n===== 开始保存文档操作 =====")
+            
             # 获取当前活动窗口信息
             window_title, process_name = self.get_active_window_info()
             
+            # 调试信息 - 显示窗口信息
+            print(f"检测到的窗口标题: '{window_title}'")
+            print(f"检测到的进程名称: '{process_name}'")
+            
+            # 避免保存本程序自身
+            if "pythonw.exe" in process_name or "python.exe" in process_name:
+                status_msg = "当前是Python程序窗口，无需保存"
+                print(status_msg)
+                self.root.after(0, lambda: self.update_status(status_msg))
+                return
+            
             # 检查是否为文档类应用程序
             is_document = self.is_document_application(process_name)
+            print(f"是否为文档应用: {is_document}")
             
             # 选择适当的保存快捷键
             if process_name in self.save_hotkeys:
                 hotkey = self.save_hotkeys[process_name]
             else:
                 hotkey = self.save_hotkeys['default']  # 使用默认的Ctrl+S
+            print(f"使用的保存快捷键: {hotkey}")
+            
+            # 确保焦点在当前窗口
+            hwnd = win32gui.GetForegroundWindow()
+            if hwnd:
+                win32gui.SetForegroundWindow(hwnd)
+                print("已确保焦点在当前窗口")
+            
+            # 添加一个小延迟，确保在正确的窗口中执行
+            time.sleep(0.2)
             
             # 发送保存快捷键
+            print("正在发送保存快捷键...")
             pyautogui.hotkey(*hotkey)
+            print("保存快捷键已发送")
             
-            # 构建状态消息
-            if is_document:
+            # 添加一个小延迟，确保保存操作完成
+            time.sleep(0.3)
+            
+            # 更精确地检测保存是否成功 - 可以根据窗口标题变化来判断
+            new_window_title = win32gui.GetWindowText(win32gui.GetForegroundWindow())
+            if new_window_title != window_title:
+                print(f"窗口标题变化: '{window_title}' -> '{new_window_title}'")
+            
+            # 构建状态消息 - 重点显示窗口标题而非进程名
+            if window_title and window_title != "无标题窗口" and window_title != "无活动窗口":
+                # 移除可能的路径信息，只显示文件名
+                if '\\' in window_title:
+                    window_title = window_title.split('\\')[-1]
                 status_msg = f"已保存文档: {window_title}"
             else:
-                status_msg = f"已尝试保存: {process_name}"
+                status_msg = f"已尝试保存当前窗口: {process_name}"
             
             print(status_msg)
+            print("===== 保存文档操作完成 =====")
+            
             # 更新状态标签
             self.root.after(0, lambda: self.update_status(status_msg))
             
         except Exception as e:
-            error_msg = f"保存文档时出错: {e}"
+            error_msg = f"保存文档时出错: {str(e)}"
             print(error_msg)
+            print("===== 保存文档操作失败 =====")
             self.root.after(0, lambda: self.update_status(error_msg))
     
     def update_status(self, status_msg):
@@ -145,12 +196,29 @@ class DocumentSaverApp:
         """键盘按键处理"""
         try:
             if hasattr(key, 'char') and key.char:
-                if key.char.lower() == 'a':
+                char = key.char.lower()
+                if char == 'a':
                     self.save_current_document()
-                elif key.char.lower() == 'q':
-                    self.quit_program()
+                elif char == 'q':
+                    # 获取当前活动窗口的标题
+                    current_hwnd = win32gui.GetForegroundWindow()
+                    current_title = win32gui.GetWindowText(current_hwnd)
+                    
+                    # 获取程序窗口的标题
+                    app_title = self.root.title()
+                    
+                    # 调试信息
+                    print(f"当前活动窗口标题: '{current_title}'")
+                    print(f"程序窗口标题: '{app_title}'")
+                    
+                    # 检查当前活动窗口是否为程序窗口（通过标题匹配）
+                    if app_title in current_title or current_title in app_title:
+                        print("检测到程序窗口是当前活动窗口，执行退出操作")
+                        self.quit_program()
+                    else:
+                        print("程序窗口不是当前活动窗口，不执行退出操作")
         except Exception as e:
-            print(f"键盘处理出错: {e}")
+            print(f"键盘处理出错: {str(e)}")
     
     def quit_program(self):
         """退出程序"""

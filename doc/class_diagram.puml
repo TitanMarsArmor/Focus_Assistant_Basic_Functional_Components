@@ -1,0 +1,122 @@
+@startuml 智能专注助手类图
+
+skinparam backgroundColor white
+skinparam handwritten false
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 14
+skinparam packageStyle rectangle
+
+package "智能专注助手" {
+  package "整合界面" {
+    class SmartAssistantApp {
+      - root: tk.Tk
+      - style: ttk.Style
+      - volume_var: tk.BooleanVar
+      - hotkey_var: tk.BooleanVar
+      - saver_var: tk.BooleanVar
+      - processes: List[subprocess.Popen]
+      - script_dir: str
+      - function_scripts: Dict[str, str]
+      
+      + __init__()
+      + update_status(status: str)
+      + start_script(script_name: str): bool
+      + start_all_functions()
+      + start_selected_functions()
+      + stop_all_processes()
+      + stop_all_functions()
+      + update_button_states()
+      + quit_program()
+      + run()
+    }
+  }
+  
+  package "功能模块" {
+    class VolumeMonitorApp {
+      - root: tk.Tk
+      - status_label: tk.Label
+      - quit_button: tk.Button
+      - listener: keyboard.Listener
+      - monitoring: bool
+      - monitor_thread: threading.Thread
+      
+      + __init__()
+      + get_system_volume(): bool
+      + is_media_playing(): bool
+      + set_system_mute()
+      + monitor_volume()
+      + show_volume_warning()
+      + on_key_press(key)
+      + quit_program()
+      + run()
+    }
+    
+    class HotkeyControllerApp {
+      - root: tk.Tk
+      - status_label: tk.Label
+      - quit_button: tk.Button
+      - listener: keyboard.Listener
+      - last_operation_time: Dict[str, float]
+      - cooldown_time: float
+      
+      + __init__()
+      + is_cooldown_over(operation_name: str): bool
+      + pause_video()
+      + switch_window()
+      + update_status(status_msg: str)
+      + on_key_press(key)
+      + quit_program()
+      + run()
+    }
+    
+    class DocumentSaverApp {
+      - root: tk.Tk
+      - status_label: tk.Label
+      - quit_button: tk.Button
+      - listener: keyboard.Listener
+      - last_save_time: float
+      - cooldown_time: float
+      - save_hotkeys: Dict[str, List[str]]
+      - document_apps: List[str]
+      
+      + __init__()
+      + is_cooldown_over(): bool
+      + get_active_window_info(): Tuple[str, str]
+      + is_document_application(process_name: str): bool
+      + save_current_document()
+      + update_status(status_msg: str)
+      + on_key_press(key)
+      + quit_program()
+      + run()
+    }
+  }
+  
+  package "系统交互" {
+    [pyautogui] as PyAutoGUI
+    [pynput.keyboard] as Pynput
+    [win32gui/win32process] as Win32API
+    [psutil] as PSUtil
+    [pycaw] as PyCAW
+    [pygame] as PyGame
+  }
+}
+
+' 定义类之间的关系
+SmartAssistantApp --> VolumeMonitorApp : 启动/管理
+SmartAssistantApp --> HotkeyControllerApp : 启动/管理
+SmartAssistantApp --> DocumentSaverApp : 启动/管理
+
+VolumeMonitorApp --> PyAutoGUI : 使用
+VolumeMonitorApp --> Pynput : 使用
+VolumeMonitorApp --> PyCAW : 使用
+VolumeMonitorApp --> PyGame : 使用
+
+HotkeyControllerApp --> PyAutoGUI : 使用
+HotkeyControllerApp --> Pynput : 使用
+
+DocumentSaverApp --> PyAutoGUI : 使用
+DocumentSaverApp --> Pynput : 使用
+DocumentSaverApp --> Win32API : 使用
+DocumentSaverApp --> PSUtil : 使用
+
+@enduml
