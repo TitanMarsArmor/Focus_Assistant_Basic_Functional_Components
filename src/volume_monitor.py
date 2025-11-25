@@ -50,6 +50,8 @@ class VolumeMonitorApp:
         
         # 启动音量监控线程
         self.monitoring = True
+        # 添加静音设置禁用时间，初始为0表示未禁用
+        self.mute_disabled_until = 0
         self.monitor_thread = threading.Thread(target=self.monitor_volume)
         self.monitor_thread.daemon = True
         self.monitor_thread.start()
@@ -69,9 +71,8 @@ class VolumeMonitorApp:
                 
                 # 尝试获取音量接口
                 try:
-                    # 正确激活音频端点
-                    interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-                    volume = cast(interface, POINTER(IAudioEndpointVolume))
+                    # 使用正确的pycaw方法获取音量
+                    volume = devices.EndpointVolume
                     
                     # 获取音量级别（0.0到1.0）
                     current_volume = volume.GetMasterVolumeLevelScalar()
@@ -241,10 +242,9 @@ class VolumeMonitorApp:
                 # 获取默认音频输出设备
                 devices = AudioUtilities.GetSpeakers()
                 
-                # 尝试获取音量接口
+                # 使用正确的pycaw方法获取并设置音量
                 try:
-                    interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-                    volume = cast(interface, POINTER(IAudioEndpointVolume))
+                    volume = devices.EndpointVolume
                     
                     # 设置为静音
                     volume.SetMute(1, None)
@@ -313,10 +313,99 @@ class VolumeMonitorApp:
             print(f"设置系统静音时发生异常: {e}")
             return False
     
+    def unmute_system(self):
+        """取消系统静音状态"""
+        try:
+            # 方法1：尝试使用pycaw取消系统静音
+            try:
+                from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+                from ctypes import cast, POINTER
+                from comtypes import CLSCTX_ALL
+                
+                # 获取默认音频输出设备
+                devices = AudioUtilities.GetSpeakers()
+                
+                # 使用正确的pycaw方法获取并设置音量
+                try:
+                    volume = devices.EndpointVolume
+                    
+                    # 取消静音
+                    volume.SetMute(0, None)
+                    # 设置一个合适的音量级别
+                    volume.SetMasterVolumeLevelScalar(0.3, None)  # 30%音量
+                    print("已取消系统静音并设置音量 (pycaw方法)")
+                    return True
+                except AttributeError:
+                    # 如果Activate方法不存在，尝试通过会话取消静音
+                    sessions = AudioUtilities.GetAllSessions()
+                    for session in sessions:
+                        if session.State == 1:  # 活动状态
+                            volume = session.SimpleAudioVolume
+                            if volume:
+                                volume.SetMute(0, None)
+                    print("已取消所有活动音频会话静音 (会话方法)")
+                    return True
+            except Exception as pycaw_error:
+                print(f"pycaw取消静音方法失败: {pycaw_error}")
+                
+                # 方法2：尝试使用win32api取消系统静音
+                try:
+                    import ctypes
+                    
+                    # 再次模拟按下静音快捷键来取消静音
+                    VK_LWIN = 0x5B
+                    VK_F3 = 0x72
+                    
+                    # 按下Windows键
+                    ctypes.windll.user32.keybd_event(VK_LWIN, 0, 0, 0)
+                    # 按下F3键
+                    ctypes.windll.user32.keybd_event(VK_F3, 0, 0, 0)
+                    # 释放F3键
+                    ctypes.windll.user32.keybd_event(VK_F3, 0, 0x0002, 0)
+                    # 释放Windows键
+                    ctypes.windll.user32.keybd_event(VK_LWIN, 0, 0x0002, 0)
+                    
+                    print("已模拟取消静音快捷键 (Windows + F3)")
+                    return True
+                except Exception as win32_error:
+                    print(f"win32api取消静音方法失败: {win32_error}")
+                    
+                    # 方法3：使用PowerShell命令取消系统静音
+                    try:
+                        import subprocess
+                        
+                        # 再次使用PowerShell命令来切换静音状态
+                        ps_command = "(New-Object -ComObject WScript.Shell).SendKeys([char]173)"
+                        result = subprocess.run(["powershell", "-Command", ps_command], 
+                                              capture_output=True, text=True, timeout=2)
+                        
+                        if result.returncode == 0:
+                            print("已通过PowerShell取消系统静音")
+                            return True
+                        else:
+                            print(f"PowerShell命令失败: {result.stderr}")
+                    except Exception as ps_error:
+                        print(f"PowerShell取消静音方法失败: {ps_error}")
+            
+            # 如果所有方法都失败
+            return False
+        except Exception as e:
+            print(f"取消系统静音时发生异常: {e}")
+            return False
+    
     def monitor_volume(self):
         """监控音量状态的线程函数"""
         while self.monitoring:
             try:
+                # 检查是否处于禁用静音设置的时间窗口内
+                current_time = time.time()
+                if current_time < self.mute_disabled_until:
+                    remaining_time = int(self.mute_disabled_until - current_time)
+                    print(f"静音设置已暂时禁用，剩余时间: {remaining_time}秒")
+                    # 等待10秒后再次检查
+                    time.sleep(10)
+                    continue
+                
                 # 检查音量和媒体播放状态
                 if self.get_system_volume() and self.is_media_playing():
                     # 设置系统静音
@@ -333,11 +422,82 @@ class VolumeMonitorApp:
                 time.sleep(2)
     
     def show_volume_warning(self):
-        """显示音量警告消息框"""
+        """显示音量警告消息框（顶层窗口，带取消静音选项）"""
         try:
-            messagebox.showinfo("音量提示", "检测到当前为外放状态，已设置系统为静音")
+            # 创建一个自定义的顶级窗口，设置为顶层
+            dialog = tk.Toplevel(self.root)
+            dialog.title("音量提示")
+            dialog.geometry("350x180")
+            dialog.resizable(False, False)
+            # 设置为顶层窗口
+            dialog.attributes('-topmost', True)
+            # 禁用父窗口
+            dialog.grab_set()
+            
+            # 计算窗口位置，使其显示在屏幕中间
+            dialog.update_idletasks()
+            width = dialog.winfo_width()
+            height = dialog.winfo_height()
+            x = (dialog.winfo_screenwidth() // 2) - (width // 2)
+            y = (dialog.winfo_screenheight() // 2) - (height // 2)
+            dialog.geometry('{}x{}+{}+{}'.format(width, height, x, y))
+            
+            # 添加提示信息
+            message = tk.Label(dialog, text="检测到当前为外放状态，已设置系统为静音", wraplength=330, pady=20)
+            message.pack()
+            
+            # 创建按钮框架
+            button_frame = tk.Frame(dialog)
+            button_frame.pack(pady=10)
+            
+            # 创建确定按钮
+            ok_button = tk.Button(button_frame, text="确定", width=10, command=dialog.destroy)
+            ok_button.pack(side=tk.LEFT, padx=5)
+            
+            # 创建取消静音设置按钮
+            cancel_mute_button = tk.Button(button_frame, text="取消静音设置", width=15, command=lambda: self.handle_cancel_mute(dialog))
+            cancel_mute_button.pack(side=tk.LEFT, padx=5)
+            
         except Exception as e:
             print(f"显示消息框时出错: {e}")
+    
+    def handle_cancel_mute(self, dialog):
+        """处理取消静音设置的逻辑"""
+        try:
+            # 取消系统静音
+            self.unmute_system()
+            
+            # 设置5分钟（300秒）内不再监测音量
+            self.mute_disabled_until = time.time() + 300
+            print("已取消静音设置，5分钟内不再监测音量")
+            
+            # 关闭对话框
+            dialog.destroy()
+            
+            # 显示一个确认消息，增大窗口尺寸以确保文字完全显示
+            confirm_dialog = tk.Toplevel(self.root)
+            confirm_dialog.title("操作确认")
+            confirm_dialog.geometry("320x120")
+            confirm_dialog.resizable(False, False)
+            confirm_dialog.attributes('-topmost', True)
+            
+            # 计算窗口位置，使其显示在屏幕中间
+            confirm_dialog.update_idletasks()
+            width = confirm_dialog.winfo_width()
+            height = confirm_dialog.winfo_height()
+            x = (confirm_dialog.winfo_screenwidth() // 2) - (width // 2)
+            y = (confirm_dialog.winfo_screenheight() // 2) - (height // 2)
+            confirm_dialog.geometry('{}x{}+{}+{}'.format(width, height, x, y))
+            
+            # 增加wraplength确保文字能完全显示
+            confirm_label = tk.Label(confirm_dialog, text="已取消静音设置，5分钟内不再监测音量", wraplength=300)
+            confirm_label.pack(pady=20)
+            
+            ok_button = tk.Button(confirm_dialog, text="确定", command=confirm_dialog.destroy)
+            ok_button.pack()
+            
+        except Exception as e:
+            print(f"处理取消静音设置时出错: {e}")
     
     def on_key_press(self, key):
         """键盘按键处理"""
