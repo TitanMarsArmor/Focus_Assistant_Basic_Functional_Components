@@ -223,21 +223,51 @@ class SmartAssistantApp:
             messagebox.showwarning("未启动", "请至少选择一个功能")
     
     def stop_all_processes(self):
-        """停止所有子进程"""
-        for process in self.processes:
+        """停止所有子进程，确保强制终止所有子进程"""
+        import signal
+        import psutil
+        
+        # 创建进程列表的副本，避免在迭代时修改列表
+        processes_to_stop = list(self.processes)
+        
+        for process in processes_to_stop:
             try:
+                # 首先尝试优雅终止
                 process.terminate()
-                # 等待进程结束，最多等待2秒
-                process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
+                
+                # 等待进程结束，增加超时时间到3秒
                 try:
-                    process.kill()
-                except Exception:
-                    pass
+                    process.wait(timeout=3)
+                    print(f"进程 {process.pid} 已终止")
+                except subprocess.TimeoutExpired:
+                    # 如果超时，尝试更强制的终止方式
+                    try:
+                        # 在Windows上，kill()实际上就是terminate()，所以需要特殊处理
+                        # 获取进程对象
+                        proc = psutil.Process(process.pid)
+                        
+                        # 强制终止进程树，确保所有子进程也被终止
+                        for child in proc.children(recursive=True):
+                            try:
+                                child.kill()
+                            except Exception as e:
+                                print(f"终止子进程 {child.pid} 时出错: {e}")
+                        
+                        # 终止主进程
+                        proc.kill()
+                        print(f"进程 {process.pid} 已强制终止")
+                    except psutil.NoSuchProcess:
+                        print(f"进程 {process.pid} 已不存在")
+                    except Exception as e:
+                        print(f"强制终止进程 {process.pid} 时出错: {e}")
             except Exception as e:
                 print(f"停止进程时出错: {e}")
+            finally:
+                # 确保从列表中移除该进程
+                if process in self.processes:
+                    self.processes.remove(process)
         
-        # 清空进程列表
+        # 清空进程列表（双重保障）
         self.processes.clear()
         self.update_status("所有功能已停止")
     

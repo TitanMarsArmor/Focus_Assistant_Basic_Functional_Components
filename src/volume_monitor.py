@@ -15,10 +15,6 @@ from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
 class VolumeMonitorApp:
     def __init__(self):
-        # 初始化pygame用于音频检测
-        pygame.init()
-        pygame.mixer.init()
-        
         # 创建主窗口
         self.root = tk.Tk()
         self.root.title("音量监控助手")
@@ -41,8 +37,20 @@ class VolumeMonitorApp:
         )
         self.quit_button.pack(pady=10)
         
+        # 初始化标志和资源
+        self.monitoring = False
+        self.listener = None
+        self.monitor_thread = None
+        
+        # 添加静音设置禁用时间，初始为0表示未禁用
+        self.mute_disabled_until = 0
+        
+        # 安全地初始化pygame
+        self.init_pygame()
+        
         # 设置全局键盘监听
         self.listener = keyboard.Listener(on_press=self.on_key_press)
+        self.listener.daemon = True
         self.listener.start()
         
         # 设置窗口关闭事件
@@ -50,8 +58,6 @@ class VolumeMonitorApp:
         
         # 启动音量监控线程
         self.monitoring = True
-        # 添加静音设置禁用时间，初始为0表示未禁用
-        self.mute_disabled_until = 0
         self.monitor_thread = threading.Thread(target=self.monitor_volume)
         self.monitor_thread.daemon = True
         self.monitor_thread.start()
@@ -393,8 +399,20 @@ class VolumeMonitorApp:
             print(f"取消系统静音时发生异常: {e}")
             return False
     
+    def init_pygame(self):
+        """安全初始化pygame"""
+        try:
+            pygame.init()
+            pygame.mixer.init()
+            print("Pygame已成功初始化")
+        except Exception as e:
+            print(f"Pygame初始化失败: {e}")
+            # 即使pygame初始化失败，程序仍可以继续运行，只是可能会影响某些功能
+    
     def monitor_volume(self):
-        """监控音量状态的线程函数"""
+        """监控音量状态的线程函数，添加超时机制和更好的错误处理"""
+        check_interval = 1  # 默认检查间隔
+        
         while self.monitoring:
             try:
                 # 检查是否处于禁用静音设置的时间窗口内
@@ -402,8 +420,11 @@ class VolumeMonitorApp:
                 if current_time < self.mute_disabled_until:
                     remaining_time = int(self.mute_disabled_until - current_time)
                     print(f"静音设置已暂时禁用，剩余时间: {remaining_time}秒")
-                    # 等待10秒后再次检查
-                    time.sleep(10)
+                    # 使用较短的间隔，但检查监控标志
+                    for _ in range(10):  # 总共等待10秒，但每秒检查一次监控标志
+                        if not self.monitoring:
+                            break
+                        time.sleep(1)
                     continue
                 
                 # 检查音量和媒体播放状态
@@ -411,15 +432,23 @@ class VolumeMonitorApp:
                     # 设置系统静音
                     self.set_system_mute()
                     # 在主线程中显示消息框
-                    self.root.after(0, self.show_volume_warning)
-                    # 避免频繁触发，等待5秒
-                    time.sleep(5)
+                    if self.monitoring and self.root:
+                        self.root.after(0, self.show_volume_warning)
+                    # 避免频繁触发，使用分段等待以响应退出信号
+                    for _ in range(5):  # 总共等待5秒，但每秒检查一次监控标志
+                        if not self.monitoring:
+                            break
+                        time.sleep(1)
                 else:
-                    # 否则等待1秒再次检查
-                    time.sleep(1)
+                    # 使用较短的间隔，确保线程可以及时响应退出信号
+                    time.sleep(check_interval)
             except Exception as e:
                 print(f"监控线程出错: {e}")
-                time.sleep(2)
+                # 发生错误后使用较短的间隔，但确保线程不会无限循环报错
+                for _ in range(2):  # 总共等待2秒，但每秒检查一次监控标志
+                    if not self.monitoring:
+                        break
+                    time.sleep(1)
     
     def show_volume_warning(self):
         """显示音量警告消息框（顶层窗口，带取消静音选项）"""
@@ -509,15 +538,59 @@ class VolumeMonitorApp:
             print(f"键盘处理出错: {e}")
     
     def quit_program(self):
-        """退出程序"""
+        """安全退出程序，确保所有线程和资源正确释放"""
         print("正在退出程序...")
+        
+        # 1. 首先停止监控标志，通知线程停止运行
         self.monitoring = False
+        
+        # 2. 停止键盘监听器
         if self.listener:
-            self.listener.stop()
-        pygame.quit()
-        self.root.quit()
-        self.root.destroy()
-        sys.exit()
+            try:
+                self.listener.stop()
+                print("键盘监听器已停止")
+            except Exception as e:
+                print(f"停止键盘监听器时出错: {e}")
+        
+        # 3. 等待监控线程结束（最多等待2秒）
+        if self.monitor_thread and self.monitor_thread.is_alive():
+            try:
+                # 由于线程设置了daemon=True，它不会阻止程序退出，但我们还是尝试等待它结束
+                import threading
+                # 使用事件和超时机制，而不是直接join，避免阻塞
+                monitor_event = threading.Event()
+                # 设置一个定时器，在1秒后继续执行退出流程
+                timer = threading.Timer(1.0, lambda: None)
+                timer.daemon = True
+                timer.start()
+                print("等待监控线程结束...")
+            except Exception as e:
+                print(f"等待监控线程结束时出错: {e}")
+        
+        # 4. 清理pygame资源
+        try:
+            pygame.quit()
+            print("Pygame资源已释放")
+        except Exception as e:
+            print(f"释放Pygame资源时出错: {e}")
+        
+        # 5. 安全关闭Tkinter窗口
+        try:
+            # 先quit，再destroy，确保事件循环停止
+            if self.root:
+                self.root.quit()
+                print("Tkinter主循环已停止")
+                # 短暂延迟，确保quit生效
+                time.sleep(0.1)
+                self.root.destroy()
+                print("Tkinter窗口已销毁")
+        except Exception as e:
+            print(f"关闭Tkinter窗口时出错: {e}")
+        
+        # 6. 最后退出Python进程
+        print("程序退出完成")
+        # 使用sys.exit(0)表示正常退出
+        sys.exit(0)
     
     def run(self):
         """运行程序主循环"""

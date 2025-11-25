@@ -221,13 +221,33 @@ class DocumentSaverApp:
             print(f"键盘处理出错: {str(e)}")
     
     def quit_program(self):
-        """退出程序"""
+        """安全退出程序，确保所有资源正确释放"""
         print("正在退出程序...")
-        if self.listener:
-            self.listener.stop()
-        self.root.quit()
-        self.root.destroy()
-        sys.exit()
+        
+        # 停止键盘监听器
+        if hasattr(self, 'listener') and self.listener:
+            try:
+                self.listener.stop()
+                print("键盘监听器已停止")
+            except Exception as e:
+                print(f"停止键盘监听器时出错: {e}")
+        
+        # 安全关闭Tkinter窗口
+        try:
+            # 先quit，再destroy，确保事件循环停止
+            if hasattr(self, 'root') and self.root:
+                self.root.quit()
+                print("Tkinter主循环已停止")
+                # 短暂延迟，确保quit生效
+                time.sleep(0.1)
+                self.root.destroy()
+                print("Tkinter窗口已销毁")
+        except Exception as e:
+            print(f"关闭Tkinter窗口时出错: {e}")
+        
+        # 最后退出Python进程
+        print("程序退出完成")
+        sys.exit(0)
     
     def run(self):
         """运行程序主循环"""
